@@ -22,29 +22,37 @@ Every arrow points **inward toward Domain**. Domain knows nothing about Flutter,
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                       PRESENTATION                              │
-│                                                                 │
+│                        GLOBAL STATE                              │
+│                                                                  │
+│   AppSettings · Auth Session · Theme · Locale                   │
+│   StreamController / ValueNotifier — accessible app-wide        │
+│   Presentation reads it. Domain never touches it.               │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │  read / write
+┌──────────────────────────────▼──────────────────────────────────┐
+│                       PRESENTATION                               │
+│                                                                  │
 │   ┌──────────────────────────────────────────────┐              │
 │   │  Screen  (StatefulWidget — build() only)     │              │
 │   └───────────────────────┬──────────────────────┘              │
 │                           │  extends                            │
 │   ┌───────────────────────▼──────────────────────┐              │
 │   │  Abstract Controller  (extends State<Screen>)│              │
-│   │  · state variables                           │              │
+│   │  · UI state variables                        │              │
 │   │  · action methods                            │              │
 │   │  · calls use cases, updates setState()       │              │
 │   └───────────────────────┬──────────────────────┘              │
 └───────────────────────────┼─────────────────────────────────────┘
                             │  calls
 ┌───────────────────────────▼─────────────────────────────────────┐
-│                         DOMAIN                                  │
-│               (pure Dart — zero Flutter imports)                │
-│                                                                 │
+│                         DOMAIN                                   │
+│               (pure Dart — zero Flutter imports)                 │
+│                                                                  │
 │   ┌─────────────────┐     ┌──────────────────────────────────┐  │
 │   │   Use Cases     │     │   Repository Interfaces          │  │
 │   │  · validation   │     │   (contracts only, no impl)      │  │
 │   │  · business     │     └──────────────────────────────────┘  │
-│   │    logic        │                                           │
+│   │    logic        │                                            │
 │   │  · sorting      │     ┌──────────────────────────────────┐  │
 │   └─────────────────┘     │   Entities / Models              │  │
 │                           │   (pure Dart data classes)       │  │
@@ -52,15 +60,15 @@ Every arrow points **inward toward Domain**. Domain knows nothing about Flutter,
 └───────────────────────────┬─────────────────────────────────────┘
                             │  implements
 ┌───────────────────────────▼─────────────────────────────────────┐
-│                           DATA                                  │
-│                                                                 │
+│                           DATA                                   │
+│                                                                  │
 │   ┌─────────────────┐     ┌──────────────────────────────────┐  │
 │   │  Repository     │     │   Data Sources                   │  │
 │   │  Impl           │     │   (HTTP · SQLite · Hive · Memory)│  │
 │   └─────────────────┘     └──────────────────────────────────┘  │
-│                                                                 │
+│                                                                  │
 │   ┌──────────────────────────────────────────────────────────┐  │
-│   │  DTOs / Mappers  (JSON ↔ Entity conversion lives here)   │  │
+│   │  DTOs / Mappers  (JSON ↔ Entity conversion lives here)  │  │
 │   └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -70,8 +78,8 @@ Every arrow points **inward toward Domain**. Domain knows nothing about Flutter,
 ## File Structure
 
 ```
-lib2/
-├── main.dart                          ← entry point (flutter run -t lib2/main.dart)
+lib/
+├── main.dart                          ← entry point (flutter run -t lib/main.dart)
 │
 ├── core/
 │   ├── result.dart                    ← sealed Result<T> (Success / Failure)
@@ -86,7 +94,7 @@ lib2/
 │       ├── get_notes_usecase.dart     ← fetch + sort (pinned first)
 │       ├── add_note_usecase.dart      ← validate + create
 │       ├── delete_note_usecase.dart   ← remove by id
-│       └── toggle_pin_usecase.dart   ← flip pinned state
+│       └── toggle_pin_usecase.dart    ← flip pinned state
 │
 ├── data/                              ← implements domain contracts
 │   ├── dto/
@@ -106,14 +114,73 @@ lib2/
             ├── controller/
             │   └── notes_controller.dart  ← all state + actions
             └── widgets/
-                ├── note_card.dart
-                ├── add_note_bottom_sheet.dart
-                └── empty_state.dart
+                ├── note_card.dart             ← dismissible card with sub-widgets
+                ├── add_note_bottom_sheet.dart ← sheet shell (StatefulWidget)
+                ├── empty_state.dart
+                ├── drag_handle.dart           ← reusable bottom sheet handle
+                ├── label_picker.dart          ← colour label selector
+                ├── note_text_field.dart       ← styled TextField wrapper
+                ├── note_submit_button.dart    ← colour-reactive submit button
+                ├── notes_app_bar.dart         ← app bar with live note count
+                ├── notes_error_view.dart      ← error + retry view
+                └── notes_fab.dart             ← "New Note" FAB
 ```
+
+> **Widget rule:** no method returns a `Widget`. Every piece of UI is a `StatelessWidget` or `StatefulWidget` class — either in its own file (if reusable) or as a private class in the same file (if tightly coupled to one parent).
 
 ---
 
 ## Layer by Layer
+
+### Global State
+
+Global state holds data that must survive screen navigation and be accessible from any controller — things like the current user session, locale, theme preference, or auth token.
+
+It lives **outside** the feature tree, above Presentation. It is the only layer that is not strictly layered — it is a horizontal concern.
+
+```dart
+// Implemented as a broadcast StreamController so any widget tree
+// can subscribe and rebuild when values change.
+class AppSettingState {
+  static final StreamController<AppSettings> stream =
+      StreamController<AppSettings>.broadcast();
+
+  static AppSettings _settings = AppSettings.defaults();
+  static AppSettings get current => _settings;
+
+  static void updateLocale(Locale locale) {
+    _settings = _settings.copyWith(locale: locale);
+    stream.sink.add(_settings);         // ← all subscribers rebuild
+    LocalDb.save(_settings);            // ← persist across restarts
+  }
+}
+```
+
+The root widget subscribes once:
+
+```dart
+// main.dart
+StreamBuilder<AppSettings>(
+  stream: AppSettingState.stream.stream,
+  initialData: AppSettingState.current,
+  builder: (context, snapshot) => MaterialApp.router(
+    locale: snapshot.data!.locale,
+    theme: snapshot.data!.theme,
+    ...
+  ),
+)
+```
+
+**What belongs in Global State vs Feature State:**
+
+| Question | Answer |
+|---|---|
+| Does more than one screen need this? | Global State |
+| Does it need to survive screen pop? | Global State |
+| Is it specific to one screen's lifecycle? | Feature State (controller) |
+| Is it purely UI (loading spinner, form input)? | Feature State (controller) |
+
+---
 
 ### Core — `Result<T>`
 
@@ -259,7 +326,7 @@ void _wire() {
 | Business logic testability | ✅ Use cases are pure Dart | ✅ | ✅ |
 | Boilerplate per feature | **Low** | High (Event + State + Bloc + Builder) | Medium |
 | Learning curve | **Native Flutter** | High | Medium |
-| State sharing across screens | Via global state | Via BlocProvider | Via providers |
+| State sharing across screens | Via Global State layer | Via BlocProvider | Via providers |
 | Framework dependency | **None** | `flutter_bloc` | `riverpod` |
 
 BLoC and Riverpod solve **state sharing and reactivity**. This pattern solves **layering and testability**. They are orthogonal — you can combine this layering with either library if your app needs cross-screen reactive state.
@@ -270,7 +337,7 @@ BLoC and Riverpod solve **state sharing and reactivity**. This pattern solves **
 
 ```bash
 # From the project root
-flutter run -t lib2/main.dart
+flutter run -t lib/main.dart
 ```
 
 The seeded notes explain the architecture — read them in the running app.
@@ -302,7 +369,9 @@ No `pumpWidget`, no `testWidgets`, no `BuildContext`. Just Dart.
 ## Key Principles
 
 1. **Dependency rule** — arrows always point inward toward Domain. Domain imports nothing outside itself.
-2. **One job per layer** — Domain validates and transforms. Data fetches and maps. Presentation renders and reacts.
-3. **Result over exceptions** — `Success` and `Failure` are values, not control flow. Pattern-match on them.
-4. **Use cases are the API** — the controller never touches a repository directly. Every action goes through a use case.
-5. **Entities are pure** — `Note` has no `fromJson`. JSON lives in the DTO in the data layer.
+2. **Global State is horizontal** — it sits above Presentation. Presentation reads it; Domain never touches it.
+3. **One job per layer** — Domain validates and transforms. Data fetches and maps. Presentation renders and reacts.
+4. **Result over exceptions** — `Success` and `Failure` are values, not control flow. Pattern-match on them.
+5. **Use cases are the API** — the controller never touches a repository directly. Every action goes through a use case.
+6. **Entities are pure** — `Note` has no `fromJson`. JSON lives in the DTO in the data layer.
+7. **No functional widgets** — every piece of UI is a `StatelessWidget` or `StatefulWidget` class, never a method returning `Widget`.
