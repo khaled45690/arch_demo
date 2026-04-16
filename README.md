@@ -22,16 +22,16 @@ Every arrow points **inward toward Domain**. Domain knows nothing about Flutter,
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        GLOBAL STATE                              │
-│                                                                  │
+│                        GLOBAL STATE                             │
+│                                                                 │
 │   AppSettings · Auth Session · Theme · Locale                   │
 │   StreamController / ValueNotifier — accessible app-wide        │
 │   Presentation reads it. Domain never touches it.               │
 └──────────────────────────────┬──────────────────────────────────┘
                                │  read / write
 ┌──────────────────────────────▼──────────────────────────────────┐
-│                       PRESENTATION                               │
-│                                                                  │
+│                       PRESENTATION                              │
+│                                                                 │
 │   ┌──────────────────────────────────────────────┐              │
 │   │  Screen  (StatefulWidget — build() only)     │              │
 │   └───────────────────────┬──────────────────────┘              │
@@ -45,9 +45,9 @@ Every arrow points **inward toward Domain**. Domain knows nothing about Flutter,
 └───────────────────────────┼─────────────────────────────────────┘
                             │  calls
 ┌───────────────────────────▼─────────────────────────────────────┐
-│                         DOMAIN                                   │
-│               (pure Dart — zero Flutter imports)                 │
-│                                                                  │
+│                         DOMAIN                                  │
+│               (pure Dart — zero Flutter imports)                │
+│                                                                 │
 │   ┌─────────────────┐     ┌──────────────────────────────────┐  │
 │   │   Use Cases     │     │   Repository Interfaces          │  │
 │   │  · validation   │     │   (contracts only, no impl)      │  │
@@ -60,15 +60,15 @@ Every arrow points **inward toward Domain**. Domain knows nothing about Flutter,
 └───────────────────────────┬─────────────────────────────────────┘
                             │  implements
 ┌───────────────────────────▼─────────────────────────────────────┐
-│                           DATA                                   │
-│                                                                  │
+│                           DATA                                  │
+│                                                                 │
 │   ┌─────────────────┐     ┌──────────────────────────────────┐  │
 │   │  Repository     │     │   Data Sources                   │  │
 │   │  Impl           │     │   (HTTP · SQLite · Hive · Memory)│  │
 │   └─────────────────┘     └──────────────────────────────────┘  │
-│                                                                  │
+│                                                                 │
 │   ┌──────────────────────────────────────────────────────────┐  │
-│   │  DTOs / Mappers  (JSON ↔ Entity conversion lives here)  │  │
+│   │  DTOs / Mappers  (JSON ↔ Entity conversion lives here)   │  │
 │   └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
